@@ -1,7 +1,16 @@
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 app = FastAPI()
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
+@app.exception_handler(RequestValidationError)
+def validation_error_handler(request, exc):
+    return JSONResponse(status_code=400, content={"error": "Title is required"})
+
+class TaskCreate(BaseModel):
+    title: str
 tasks = [
     {"id": 1, "title": "Buy milk", "done": False},
     {"id": 2, "title": "Walk the dog", "done": False},
@@ -30,3 +39,12 @@ def get_task(task_id: int):
         if task["id"] == task_id:
             return task
     raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+@app.post("/tasks", status_code=201)
+def create_task(task: TaskCreate):
+    if not task.title.strip():
+        raise HTTPException(status_code=400, detail={"error": "Title is required"})
+    
+    new_id = max((t["id"] for t in tasks), default=0) + 1
+    new_task = {"id": new_id, "title": task.title, "done": False}
+    tasks.append(new_task)
+    return new_task

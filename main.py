@@ -1,36 +1,39 @@
-import sqlite3
+import os
+from dotenv import load_dotenv
+import psycopg
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+load_dotenv()  # reads .env into environment variables
+
 app = FastAPI()
 
-DB_FILE = "tasks.db"
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 def get_connection():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row  # lets us access columns by name
-    return conn
+    return psycopg.connect(DATABASE_URL)
 
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             title TEXT NOT NULL,
-            done BOOLEAN NOT NULL DEFAULT 0
+            done BOOLEAN NOT NULL DEFAULT FALSE
         )
     """)
     cursor.execute("SELECT COUNT(*) FROM tasks")
     count = cursor.fetchone()[0]
     if count == 0:
         cursor.executemany(
-            "INSERT INTO tasks (title, done) VALUES (?, ?)",
-            [("Buy milk", 0), ("Walk the dog", 0), ("Finish assignment", 1)]
+            "INSERT INTO tasks (title, done) VALUES (%s, %s)",
+            [("Buy milk", False), ("Walk the dog", False), ("Finish assignment", True)]
         )
     conn.commit()
+    cursor.close()
     conn.close()
 
 init_db()  # runs once when the app starts

@@ -24,7 +24,11 @@ uvicorn main:app --reload
 On first run, `tasks.db` is created automatically, the `tasks` table is created if missing, and 3 example tasks are inserted only if the table is empty.
 
 Visit `http://127.0.0.1:8000/docs` for interactive Swagger UI.
+## Running Postgres (Stage 0)
 
+```
+docker run --name taskdb -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=tasks -p 5432:5432 -v taskdata:/var/lib/postgresql/data -d postgres:17
+```
 ## Endpoints
 
 | Method | Path | Description |

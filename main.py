@@ -38,12 +38,20 @@ def init_db():
 
 init_db()  # runs once when the app starts
 
+
 class TaskCreate(BaseModel):
     title: str
+
+
+class TaskUpdate(BaseModel):
+    title: str
+    done: bool
+
 
 @app.exception_handler(RequestValidationError)
 def validation_error_handler(request, exc):
     return JSONResponse(status_code=400, content={"error": "Title is required"})
+
 
 @app.get("/")
 def root():
@@ -53,28 +61,36 @@ def root():
         "endpoints": ["/tasks"]
     }
 
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
 @app.get("/tasks")
 def get_tasks():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM tasks")
+    cursor.execute("SELECT id, title, done FROM tasks")
     rows = cursor.fetchall()
+    cursor.close()
     conn.close()
-    return [dict(row) for row in rows]
+    return [{"id": r[0], "title": r[1], "done": r[2]} for r in rows]
+
 
 @app.get("/tasks/{task_id}")
 def get_task(task_id: int):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = %s", (task_id,))
     row = cursor.fetchone()
+    cursor.close()
     conn.close()
     if row is None:
         raise HTTPException(status_code=404, detail={"error": "Task not found"})
-    return dict(row)
+    return {"id": row[0], "title": row[1], "done": row[2]}
+
+
 @app.post("/tasks", status_code=201)
 def create_task(task: TaskCreate):
     if not task.title.strip():
@@ -83,17 +99,16 @@ def create_task(task: TaskCreate):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO tasks (title, done) VALUES (?, ?)",
-        (task.title, 0)
+        "INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING id",
+        (task.title, False)
     )
+    new_id = cursor.fetchone()[0]
     conn.commit()
-    new_id = cursor.lastrowid
+    cursor.close()
     conn.close()
 
-    return {"id": new_id, "title": task.title, "done": 0}
-class TaskUpdate(BaseModel):
-    title: str
-    done: bool
+    return {"id": new_id, "title": task.title, "done": False}
+
 
 @app.put("/tasks/{task_id}")
 def update_task(task_id: int, task: TaskUpdate):
@@ -103,25 +118,28 @@ def update_task(task_id: int, task: TaskUpdate):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "UPDATE tasks SET title = ?, done = ? WHERE id = ?",
-        (task.title, int(task.done), task_id)
+        "UPDATE tasks SET title = %s, done = %s WHERE id = %s",
+        (task.title, task.done, task_id)
     )
-    conn.commit()
     updated = cursor.rowcount
+    conn.commit()
+    cursor.close()
     conn.close()
 
     if updated == 0:
         raise HTTPException(status_code=404, detail={"error": "Task not found"})
 
-    return {"id": task_id, "title": task.title, "done": int(task.done)}
+    return {"id": task_id, "title": task.title, "done": task.done}
+
 
 @app.delete("/tasks/{task_id}", status_code=204)
 def delete_task(task_id: int):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-    conn.commit()
+    cursor.execute("DELETE FROM tasks WHERE id = %s", (task_id,))
     deleted = cursor.rowcount
+    conn.commit()
+    cursor.close()
     conn.close()
 
     if deleted == 0:

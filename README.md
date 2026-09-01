@@ -1,34 +1,30 @@
 # Task API
 
-A CRUD (Create, Read, Update, Delete) API for managing a to-do list, built with FastAPI and backed by a SQLite database. Task data persists across server restarts.
-
-## Why SQLite
-
-SQLite was chosen because it requires no separate database server or installation — it stores the entire database in a single file (`tasks.db`) on disk, making it ideal for a small local project like this one. The database and table are created automatically the first time the app runs.
-
-## Where the database is stored
-
-The database lives in a single file, `tasks.db`, created automatically in the project's root folder the first time the app starts. It is excluded from Git via `.gitignore`, since each developer's local database file is their own.
+A CRUD (Create, Read, Update, Delete) API for managing a to-do list, built with FastAPI and PostgreSQL, fully containerized with Docker. The entire stack — app and database — starts with a single command.
 
 ## How to run it
 
 ```bash
 git clone https://github.com/maansi4025-lgtm/todo_api.git
 cd todo_api
-python -m venv venv
-venv\Scripts\activate
-pip install fastapi uvicorn
-uvicorn main:app --reload
+cp .env.example .env
+docker compose up
 ```
-
-On first run, `tasks.db` is created automatically, the `tasks` table is created if missing, and 3 example tasks are inserted only if the table is empty.
 
 Visit `http://127.0.0.1:8000/docs` for interactive Swagger UI.
-## Running Postgres (Stage 0)
+
+On first run, the `tasks` table is created automatically, and 3 example tasks are inserted only if the table is empty.
+
+## Environment variables
+
+See `.env.example` for the required variables. Copy it to `.env` before running:
 
 ```
-docker run --name taskdb -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=tasks -p 5432:5432 -v taskdata:/var/lib/postgresql/data -d postgres:17
+DATABASE_URL=postgres://postgres:dev@db:5432/tasks
 ```
+
+`.env` is git-ignored — never commit real secrets.
+
 ## Endpoints
 
 | Method | Path | Description |
@@ -41,22 +37,33 @@ docker run --name taskdb -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=tasks -p 5432:5
 | PUT | `/tasks/{task_id}` | Update a task |
 | DELETE | `/tasks/{task_id}` | Delete a task |
 
-## Proving persistence
+## Example request
 
-Created a task via `POST /tasks`, then fully stopped the server (`Ctrl+C`) and restarted it (`uvicorn main:app --reload`). Ran `GET /tasks` again — the created task was still present, confirming data survives a restart because it's written to `tasks.db` on disk rather than held in memory.
+```
+curl.exe --% -i -X POST http://127.0.0.1:8000/tasks -H "Content-Type: application/json" -d "{\"title\":\"Buy oat milk\"}"
 
-## Database viewer
+HTTP/1.1 201 Created
+content-type: application/json
 
-Opened `tasks.db` in DB Browser for SQLite to run queries directly against the database:
-
-```sql
-SELECT * FROM tasks WHERE done = 1;
+{"id":4,"title":"Buy oat milk","done":false}
 ```
 
-![DB Browser](screenshots/db_browser.png)
+## Proving persistence
 
-Confirmed that changes made directly in DB Browser (e.g. deleting all completed tasks) were immediately reflected by the running API — proving the API and the database file are one shared source of truth.
+Created a task via `POST /tasks`, then ran `docker compose down` followed by `docker compose up` — a full teardown and rebuild of both the app and database containers. Ran `GET /tasks` again — the created task was still present, confirming data survives a full stack restart because it's written to a Docker volume, not the container's own disposable filesystem.
+
+## Database screenshot
+
+```
+docker exec -it to_do_api-db-1 psql -U postgres -d tasks -c "SELECT * FROM tasks;"
+```
+
+![Postgres data](screenshots/postgres_data.png)
+
+## Architecture note
+
+This project has now stored its data three different ways — an in-memory list, a SQLite file, and now PostgreSQL running in Docker — with the API's routes barely changing across all three. Only the storage layer (the functions that talk to the database) changed each time. This demonstrates that persistence is an implementation detail behind the API, not a property of the API itself.
 
 ## Notes
 
-Data is stored in SQLite (`tasks.db`) instead of memory, so it now survives server restarts — this is the fix for the "mortality" limitation observed in the previous in-memory version of this project.
+Data is stored in PostgreSQL, running in its own Docker container with a named volume (`taskdata`), so it now survives not just app restarts but full container teardowns — the most durable of the three storage approaches this project has used.

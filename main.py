@@ -55,7 +55,7 @@ class TaskUpdate(BaseModel):
 
 @app.exception_handler(RequestValidationError)
 def validation_error_handler(request, exc):
-    return JSONResponse(status_code=400, content={"error": "Title is required"})
+    return JSONResponse(status_code=400, content={"error": "Invalid or missing required fields"})
 
 
 @app.get("/")
@@ -150,3 +150,35 @@ def delete_task(task_id: int):
     if deleted == 0:
         raise HTTPException(status_code=404, detail={"error": "Task not found"})
     return
+class AuthCredentials(BaseModel):
+    email: str
+    password: str
+
+@app.post("/auth/signup", status_code=201)
+def signup(credentials: AuthCredentials):
+    if not credentials.email.strip() or not credentials.password.strip():
+        raise HTTPException(status_code=400, detail={"error": "Email and password are required"})
+
+    result = supabase.auth.sign_up({
+        "email": credentials.email,
+        "password": credentials.password
+    })
+    return {"user": result.user}
+
+@app.post("/auth/login")
+def login(credentials: AuthCredentials):
+    if not credentials.email.strip() or not credentials.password.strip():
+        raise HTTPException(status_code=400, detail={"error": "Email and password are required"})
+
+    try:
+        result = supabase.auth.sign_in_with_password({
+            "email": credentials.email,
+            "password": credentials.password
+        })
+    except Exception:
+        raise HTTPException(status_code=401, detail={"error": "Invalid login credentials"})
+
+    return {
+        "access_token": result.session.access_token,
+        "refresh_token": result.session.refresh_token
+    }

@@ -1,6 +1,6 @@
 # Task API
 
-A CRUD (Create, Read, Update, Delete) API for managing a to-do list, built with FastAPI and PostgreSQL, fully containerized with Docker. The entire stack — app and database — starts with a single command.
+A CRUD (Create, Read, Update, Delete) API for managing a to-do list, built with FastAPI, PostgreSQL, and Supabase Auth for user authentication. Fully containerized with Docker.
 
 ## How to run it
 
@@ -8,62 +8,78 @@ A CRUD (Create, Read, Update, Delete) API for managing a to-do list, built with 
 git clone https://github.com/maansi4025-lgtm/todo_api.git
 cd todo_api
 cp .env.example .env
+```
+
+Edit `.env` and fill in your own Supabase project URL and anon key (from your Supabase dashboard → Project Settings → API), then:
+
+```bash
 docker compose up
 ```
 
 Visit `http://127.0.0.1:8000/docs` for interactive Swagger UI.
 
-On first run, the `tasks` table is created automatically, and 3 example tasks are inserted only if the table is empty.
-
 ## Environment variables
 
-See `.env.example` for the required variables. Copy it to `.env` before running:
+See `.env.example`:
 
 ```
 DATABASE_URL=postgres://postgres:dev@db:5432/tasks
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_KEY=your_supabase_anon_key
+PORT=8000
 ```
-
-`.env` is git-ignored — never commit real secrets.
 
 ## Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/` | API info |
-| GET | `/health` | Health check |
-| GET | `/tasks` | List all tasks |
-| GET | `/tasks/{task_id}` | Get a single task |
-| POST | `/tasks` | Create a new task |
-| PUT | `/tasks/{task_id}` | Update a task |
-| DELETE | `/tasks/{task_id}` | Delete a task |
+| Method | Path | Auth required | Description |
+|---|---|---|---|
+| GET | `/` | No | API info |
+| GET | `/health` | No | Health check |
+| GET | `/public/info` | No | Public welcome message |
+| POST | `/auth/signup` | No | Create a new user account |
+| POST | `/auth/login` | No | Log in, returns access + refresh tokens |
+| POST | `/auth/logout` | Yes | End the current session |
+| GET | `/protected/profile` | Yes | Get the logged-in user's profile |
+| GET | `/protected/dashboard` | Yes | Example second protected route |
+| GET | `/tasks` | No | List all tasks |
+| GET | `/tasks/{task_id}` | No | Get a single task |
+| POST | `/tasks` | No | Create a new task |
+| PUT | `/tasks/{task_id}` | No | Update a task |
+| DELETE | `/tasks/{task_id}` | No | Delete a task |
 
-## Example request
+## Example: signup → login → protected call
 
 ```
-curl.exe --% -i -X POST http://127.0.0.1:8000/tasks -H "Content-Type: application/json" -d "{\"title\":\"Buy oat milk\"}"
+curl.exe --% -i -X POST http://127.0.0.1:8000/auth/signup -H "Content-Type: application/json" -d "{\"email\":\"user@example.com\",\"password\":\"yourpassword\"}"
 
 HTTP/1.1 201 Created
-content-type: application/json
-
-{"id":4,"title":"Buy oat milk","done":false}
+{"user": {...}}
 ```
 
-## Proving persistence
-
-Created a task via `POST /tasks`, then ran `docker compose down` followed by `docker compose up` — a full teardown and rebuild of both the app and database containers. Ran `GET /tasks` again — the created task was still present, confirming data survives a full stack restart because it's written to a Docker volume, not the container's own disposable filesystem.
-
-## Database screenshot
-
 ```
-docker exec -it to_do_api-db-1 psql -U postgres -d tasks -c "SELECT * FROM tasks;"
+curl.exe --% -i -X POST http://127.0.0.1:8000/auth/login -H "Content-Type: application/json" -d "{\"email\":\"user@example.com\",\"password\":\"yourpassword\"}"
+
+HTTP/1.1 200 OK
+{"access_token": "eyJhbGc...", "refresh_token": "..."}
 ```
 
-![Postgres data](screenshots/postgres_data.png)
+```
+curl.exe --% -i http://127.0.0.1:8000/protected/profile -H "Authorization: Bearer eyJhbGc..."
 
-## Architecture note
+HTTP/1.1 200 OK
+{"id": "...", "email": "user@example.com", "created_at": "..."}
+```
 
-This project has now stored its data three different ways — an in-memory list, a SQLite file, and now PostgreSQL running in Docker — with the API's routes barely changing across all three. Only the storage layer (the functions that talk to the database) changed each time. This demonstrates that persistence is an implementation detail behind the API, not a property of the API itself.
+A tampered token on the same route returns:
+```
+HTTP/1.1 401 Unauthorized
+{"error": "Invalid or expired token"}
+```
+
+## Swagger UI
+
+![Swagger with bearer auth](screenshots/swagger_auth.png)
 
 ## Notes
 
-Data is stored in PostgreSQL, running in its own Docker container with a named volume (`taskdata`), so it now survives not just app restarts but full container teardowns — the most durable of the three storage approaches this project has used.
+Authentication is handled entirely by Supabase Auth — this project never stores, hashes, or handles raw passwords itself. Token verification uses `supabase.auth.get_user(token)`, which makes a live network call to Supabase to confirm a token's signature is genuinely valid, not tampered with. A single reusable dependency (`get_current_user`) guards every protected route, demonstrated on two separate endpoints with zero duplicated authentication logic.

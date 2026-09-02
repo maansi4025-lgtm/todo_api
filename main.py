@@ -4,6 +4,7 @@ import psycopg
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from supabase import create_client, Client
 
@@ -14,6 +15,7 @@ SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI()
+bearer_scheme = HTTPBearer()
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -51,12 +53,8 @@ class TaskCreate(BaseModel):
 class TaskUpdate(BaseModel):
     title: str
     done: bool
-def get_current_user(request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail={"error": "Access token required"})
-
-    token = auth_header.split(" ")[1]
+def get_current_user(credentials=Depends(bearer_scheme)):
+    token = credentials.credentials
 
     try:
         user_response = supabase.auth.get_user(token)

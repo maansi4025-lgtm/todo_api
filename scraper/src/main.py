@@ -151,18 +151,33 @@ def clean_and_validate(raw_records: list[dict]) -> tuple[list[dict], list[dict]]
 
     return valid_records, invalid_records
 if __name__ == "__main__":
+    run_start = datetime.now(timezone.utc)
+
     urls = discover_book_urls()
 
+    # Stage 5 checkpoint: deliberately add one fake URL to prove failure handling
+    
+
     raw_records = []
+    failed_pages = 0
+    cache_hits = 0
+    fetches = 0
+
     for url in urls:
         cache_filename = url.rstrip("/").split("/")[-2] + ".html"
         was_cached = os.path.exists(os.path.join(CACHE_DIR, cache_filename))
 
-        record = extract_book(url, source_page="catalogue")
-        raw_records.append(record)
-
-        if not was_cached:
-            time.sleep(0.5)
+        try:
+            record = extract_book(url, source_page="catalogue")
+            raw_records.append(record)
+            if was_cached:
+                cache_hits += 1
+            else:
+                fetches += 1
+                time.sleep(0.5)
+        except RuntimeError as e:
+            print(f"FAILED: {url} — {e}")
+            failed_pages += 1
 
     valid_records, invalid_records = clean_and_validate(raw_records)
 
@@ -174,5 +189,22 @@ if __name__ == "__main__":
         with open("output/errors.json", "w", encoding="utf-8") as f:
             json.dump(invalid_records, f, indent=2)
 
+    run_end = datetime.now(timezone.utc)
+    duration_seconds = (run_end - run_start).total_seconds()
+
+    report = {
+        "start_time": run_start.isoformat(),
+        "duration_seconds": duration_seconds,
+        "pages_fetched": fetches,
+        "cache_hits": cache_hits,
+        "valid_records": len(valid_records),
+        "invalid_records": len(invalid_records),
+        "failed_pages": failed_pages
+    }
+
+    with open("output/run-report.json", "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
+
     print(f"valid_records={len(valid_records)}")
     print(f"invalid_records={len(invalid_records)}")
+    print(f"failed_pages={failed_pages}")

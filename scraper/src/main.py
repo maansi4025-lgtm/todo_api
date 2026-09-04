@@ -1,6 +1,7 @@
 import os
 import time
 import requests
+from datetime import datetime, timezone
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
@@ -24,6 +25,7 @@ def fetch_page(url: str, cache_filename: str) -> str:
     if response.status_code != 200:
         raise RuntimeError(f"Fetch failed: {url} returned status {response.status_code}")
 
+    response.encoding = "utf-8"
     html = response.text
     os.makedirs(CACHE_DIR, exist_ok=True)
     with open(cache_path, "w", encoding="utf-8") as f:
@@ -52,7 +54,7 @@ def discover_book_urls():
             all_book_urls.append(absolute_url)
 
         if not was_cached:
-            time.sleep(0.5)  # politeness delay — only for real requests
+            time.sleep(0.5)
 
         next_link = soup.select_one("li.next a")
         if next_link is None or page_num >= 3:
@@ -61,7 +63,7 @@ def discover_book_urls():
         page_num += 1
         page_url = urljoin(page_url, next_link["href"])
 
-    unique_urls = list(dict.fromkeys(all_book_urls))  # removes duplicates, keeps order
+    unique_urls = list(dict.fromkeys(all_book_urls))
 
     print(f"catalogue_pages={page_num}")
     print(f"discovered={len(all_book_urls)}")
@@ -70,5 +72,50 @@ def discover_book_urls():
     return unique_urls
 
 
+def extract_book(book_url: str, source_page: str) -> dict:
+    cache_filename = book_url.rstrip("/").split("/")[-2] + ".html"
+
+    html = fetch_page(book_url, cache_filename)
+    soup = BeautifulSoup(html, "html.parser")
+
+    product_main = soup.select_one("div.product_main")
+    title = product_main.select_one("h1").get_text(strip=True)
+
+    price_text = product_main.select_one("p.price_color").get_text(strip=True)
+
+    availability_text = product_main.select_one("p.availability").get_text(strip=True)
+
+    rating_tag = product_main.select_one("p.star-rating")
+    rating_text = rating_tag["class"][1] if rating_tag else None
+
+    description_tag = soup.select_one("#product_description ~ p")
+    description = description_tag.get_text(strip=True) if description_tag else None
+
+    return {
+        "title": title,
+        "product_url": book_url,
+        "price_text": price_text,
+        "availability_text": availability_text,
+        "rating_text": rating_text,
+        "description": description,
+        "source_page": source_page,
+        "fetched_at": datetime.now(timezone.utc).isoformat()
+    }
+
+
 if __name__ == "__main__":
     urls = discover_book_urls()
+
+    records = []
+    for url in urls:
+        cache_filename = url.rstrip("/").split("/")[-2] + ".html"
+        was_cached = os.path.exists(os.path.join(CACHE_DIR, cache_filename))
+
+        record = extract_book(url, source_page="catalogue")
+        records.append(record)
+
+        if not was_cached:
+            time.sleep(0.5)
+
+    print(f"detail_pages={len(records)}")
+    print(records[0])

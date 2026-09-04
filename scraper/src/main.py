@@ -1,6 +1,9 @@
 import os
 import time
 import requests
+import json
+import re
+from pydantic import BaseModel, HttpUrl, ValidationError
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
@@ -101,21 +104,75 @@ def extract_book(book_url: str, source_page: str) -> dict:
         "source_page": source_page,
         "fetched_at": datetime.now(timezone.utc).isoformat()
     }
+class BookRecord(BaseModel):
+    title: str
+    product_url: HttpUrl
+    price_gbp: float
+    price_text: str
+    availability_text: str
+    rating_text: str | None
+    description: str | None
+    source_page: str
+    fetched_at: str
 
 
+def normalize_price(price_text: str) -> float:
+    # "£51.77" -> 51.77
+    cleaned = re.sub(r"[^\d.]", "", price_text)
+    return float(cleaned)
+
+
+def clean_and_validate(raw_records: list[dict]) -> tuple[list[dict], list[dict]]:
+    valid_records = []
+    invalid_records = []
+    seen_urls = set()
+
+    for raw in raw_records:
+        if raw["product_url"] in seen_urls:
+            continue
+        seen_urls.add(raw["product_url"])
+
+        try:
+            price_gbp = normalize_price(raw["price_text"])
+            record = BookRecord(
+                title=raw["title"],
+                product_url=raw["product_url"],
+                price_gbp=price_gbp,
+                price_text=raw["price_text"],
+                availability_text=raw["availability_text"],
+                rating_text=raw["rating_text"],
+                description=raw["description"],
+                source_page=raw["source_page"],
+                fetched_at=raw["fetched_at"]
+            )
+            valid_records.append(json.loads(record.model_dump_json()))
+        except (ValidationError, ValueError) as e:
+            invalid_records.append({"record": raw, "error": str(e)})
+
+    return valid_records, invalid_records
 if __name__ == "__main__":
     urls = discover_book_urls()
 
-    records = []
+    raw_records = []
     for url in urls:
         cache_filename = url.rstrip("/").split("/")[-2] + ".html"
         was_cached = os.path.exists(os.path.join(CACHE_DIR, cache_filename))
 
         record = extract_book(url, source_page="catalogue")
-        records.append(record)
+        raw_records.append(record)
 
         if not was_cached:
             time.sleep(0.5)
 
-    print(f"detail_pages={len(records)}")
-    print(records[0])
+    valid_records, invalid_records = clean_and_validate(raw_records)
+
+    os.makedirs("output", exist_ok=True)
+    with open("output/books.json", "w", encoding="utf-8") as f:
+        json.dump(valid_records, f, indent=2)
+
+    if invalid_records:
+        with open("output/errors.json", "w", encoding="utf-8") as f:
+            json.dump(invalid_records, f, indent=2)
+
+    print(f"valid_records={len(valid_records)}")
+    print(f"invalid_records={len(invalid_records)}")
